@@ -16,17 +16,15 @@ import requests
 import json
 import pprint
 import netifaces
+import traceback
 import sys
 import ifaddr
 import clr
 import ctypes
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+import logging
+import logging.config
+
 c = wmi.WMI()
-
-print('sdfsd')
-
-print('Hi')
 
 for diskDrive in c.query("SELECT * FROM Win32_DiskDrive"):
     diskDrive.Size, "\nDisk model: ", diskDrive.Model,  diskDrive.Status
@@ -39,15 +37,48 @@ except ImportError as err:
     except ImportError as err:
         pass
 
-#if os.path.isfile('c:\\monyze\\agent\\windows\\keys.key'):
-keys= 'c:\\monyze\\agent\\windows\\keys.key'
-f = open(keys, 'r')
-id_user = f.readline()
-id_computer = f.readline()
-f.close()
-#else:
-#    print('file_err')
+workdir = os.path.dirname(os.path.abspath(__file__))
+config = os.path.join(workdir,"config.ini")
 
+f = open(config, 'r')
+id_user = f.readline().rstrip('\n')
+id_computer = f.readline().rstrip('\n')
+dll_path = f.readline().rstrip('\n')
+f.close()
+
+#logging
+logConfig = {
+        "version":1,
+        "handlers":{
+            "fileHandler":{
+                "class":"logging.FileHandler",
+                "formatter":"myFormatter",
+                "filename":os.path.join(dll_path,"monyze-agent.log")
+            }
+        },
+        "loggers":{
+            "monyze":{
+                "handlers":["fileHandler"],
+                "level":"INFO",
+                "level":"DEBUG",
+            }
+        },
+        "formatters":{
+            "myFormatter":{
+                "format":"%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            }
+        }
+    }
+
+logging.config.dictConfig(logConfig)
+logger = logging.getLogger("monyze.main")
+
+
+ohwm_dll = os.path.join(dll_path,"OpenHardwareMonitorLib.dll")
+
+logger.info ('------------------------------------- ')
+logger.info ('Запуск агента')
+logger.info ("Путь к библиотеке ohwm: "+ohwm_dll)
 
 pp = pprint.PrettyPrinter(indent=4)
 nodename = platform.node()
@@ -66,12 +97,12 @@ interfaces = netifaces.interfaces()
 adapters = ifaddr.get_adapters()
 net_stats = psutil.net_if_stats()
 
+logger.info ('Переменные определены')
+
 driveinfo = []
 hddpos = 0
 cpu_load = {}
 cpu_cores = []
-
-script_dir = os.getcwd()
 
 openhardwaremonitor_hwtypes = ['Mainboard', 'SuperIO', 'CPU','RAM', 'GpuNvidia', 'GpuAti', 'TBalancer', 'Heatmaster', 'HDD']
 cputhermometer_hwtypes = ['Mainboard', 'SuperIO', 'CPU','GpuNvidia', 'GpuAti', 'TBalancer', 'Heatmaster', 'HDD']
@@ -80,12 +111,10 @@ cputhermometer_sensortypes = ['Voltage', 'Clock', 'Temperature', 'Load', 'Fan', 
 cpu_load_sensornames = ['CPU Total', 'CPU Core', 'CPU Core #1', 'CPU Core #2','CPU Core #3', 'CPU Core #4', 'CPU Core #5', 'CPU Core #6', 'CPU Core #7', 'CPU Core #8']
 cpu_temperature_sensornames = ['CPU Package', 'CPU Core #1', 'CPU Core #2', 'CPU Core #3','CPU Core #4', 'CPU Core #5', 'CPU Core #6', 'CPU Core #7', 'CPU Core #8']
 
-
+logger.info ('Инициализация ohwm')
 def initialize_openhardwaremonitor():
-    ohwm_dll = "c:\\monyze\\agent\\windows\\OpenHardwareMonitorLib.dll"
     clr.AddReference(ohwm_dll)
     from OpenHardwareMonitor import Hardware
-
     handle = Hardware.Computer()
     handle.MainboardEnabled = True
     handle.CPUEnabled = True
@@ -96,22 +125,25 @@ def initialize_openhardwaremonitor():
     return handle
 
 HardwareHandle = initialize_openhardwaremonitor()
-
-for pdisk in c.query("SELECT * FROM Win32_DiskDrive"):
-    hddpos = hddpos + 1
+logger.info ('ohwm инициализирован')
+logger.info ('Получаем данные о дисках')
+for pdisk in c.query("SELECT * FROM Win32_DiskDrive"): 
     lnames = []
-    Size = str(round((int(pdisk.Size)/1024/1024/1024), 2))
-    strcl = pdisk.deviceID.replace("\\", "")
-    pdiskcleared = strcl.replace(".PHYSICALDRIVE", "PhysicalDrive")
-    for colpartition in c.query('ASSOCIATORS OF {Win32_DiskDrive.DeviceID="' + pdisk.deviceID + '"} WHERE AssocClass = Win32_DiskDriveToDiskPartition'):
-        for logical_disk in c.query('ASSOCIATORS OF {Win32_DiskPartition.DeviceID="' + colpartition.DeviceID + '"} WHERE AssocClass = Win32_LogicalDiskToPartition'):
-            lname = logical_disk.DeviceID
-            lnames.append(lname)
-            l = {'hdd_'+str(hddpos)+'': {'name': pdisk.Model,'size': Size, 'LOGICAL': lnames}}
-    driveinfo.append(l)
-
+    if (pdisk.Size is not None):
+        hddpos = hddpos + 1
+        Size = round((int(pdisk.Size)/1024/1024/1024), 2)
+        strcl = pdisk.deviceID.replace("\\", "")
+        pdiskcleared = strcl.replace(".PHYSICALDRIVE", "PhysicalDrive")
+        for colpartition in c.query('ASSOCIATORS OF {Win32_DiskDrive.DeviceID="' + pdisk.deviceID + '"} WHERE AssocClass = Win32_DiskDriveToDiskPartition'):
+            for logical_disk in c.query('ASSOCIATORS OF {Win32_DiskPartition.DeviceID="' + colpartition.DeviceID + '"} WHERE AssocClass = Win32_LogicalDiskToPartition'):
+                lname = logical_disk.DeviceID
+                lnames.append(lname)
+                l = {'hdd_'+str(hddpos)+'': {'name': pdisk.Model,'size': Size, 'LOGICAL': lnames}}
+        driveinfo.append(l)
+logger.info ('Данные о дисках получены')
 
 def get_config_data(handle):
+    logger.info ('Инициализируем конфигурацию устройства')
     cpuinfo = {}
     c_count = 0
     for i in handle.Hardware:
@@ -130,6 +162,7 @@ def get_config_data(handle):
                         c_count = c_count+1
                         cpuinfo['cpu_'+str(c_count)] = sensor.Hardware.Name
                         break
+
     net = {}
     for i, adapter in enumerate(adapters):
         try:
@@ -152,7 +185,7 @@ def get_config_data(handle):
                     net['net_'+str((i)+1)] = {'model': model,'name': name, 'speed': speed, 'addr': ip}
         except KeyError:
             continue
-
+    logger.info("Конфигурация устройства инициализирована")
     config_data = {
 
         "id": {
@@ -176,18 +209,9 @@ def get_config_data(handle):
         }
     }
 
-    url = 'http://monyze.ru/api.1.php'
-
-    with requests.Session() as s:
-        retries = Retry(
-            total=10,
-            backoff_factor=0.2,
-            status_forcelist=[500, 502, 503, 504])
-
-    s.mount('http://', HTTPAdapter(max_retries=retries))
-    s.mount('https://', HTTPAdapter(max_retries=retries))
-
-    r = s.post(url, json.dumps(config_data))
+    url = 'https://monyze.ru/api.php'
+    requests.post(url, json.dumps(config_data))
+    logger.info('Конфигурация устройства отправлена')
 
 
 def get_load_data(handle):
@@ -354,50 +378,45 @@ def get_load_data(handle):
         }
     }
 
-    url = 'http://monyze.ru/api.1.php'
-
-    with requests.Session() as s:
-        retries = Retry(
-            total=10,
-            backoff_factor=0.2,
-            status_forcelist=[500, 502, 503, 504])
-
-    s.mount('http://', HTTPAdapter(max_retries=retries))
-    s.mount('https://', HTTPAdapter(max_retries=retries))
-
-    r = s.post(url, json.dumps(load_data))
-
+    url = 'https://monyze.ru/api.php'
+    try:
+        requests.post(url, json.dumps(load_data))
+    except:
+        logger.warning('Ошибка отправки данных load_data')
+        pass
 
 class monyze_agent(win32serviceutil.ServiceFramework):
     _svc_name_ = "monyze_agent"
     _svc_display_name_ = "Monyze agent service"
 
     def __init__(self, args):
+        logger.info('Запуск службы')
         win32serviceutil.ServiceFramework.__init__(self, args)
         self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
         socket.setdefaulttimeout(60)
-        log = open('C:\\TestService.log', 'a')
-        log.write('Service started...\n')
-        log.write('Trying to send config...\n')
-        log.close()
-        get_config_data(HardwareHandle)
-           
+        try:
+            get_config_data(HardwareHandle)
+            logger.info('Служба запущена')
+        except:
+            logger.warning("Не удалось отправить конфигурацию устройства", traceback.format_exc())
         
+      
     def SvcStop(self):
-        log = open('C:\\TestService.log', 'a')
-        log.write('Service stopped...\n')
-        log.close()
+        logger.info('Остановка службы')
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         win32event.SetEvent(self.hWaitStop)
 
     def SvcDoRun(self):
         rc = None
+        logger.info('Отправка данных')
         while rc != win32event.WAIT_OBJECT_0:
-            with open('C:\\TestService.log', 'a') as log:
+            try:
                 get_load_data(HardwareHandle)
-                log.write('load data sent...\n')
-            rc = win32event.WaitForSingleObject(self.hWaitStop, 5000)
-
+                rc = win32event.WaitForSingleObject(self.hWaitStop, 5000)
+            except:
+                logger.warning("Ошибка в Svc_do_run - get_load_data")
+                logger.warning(traceback.format_exc())
+                pass
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
