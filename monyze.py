@@ -219,7 +219,7 @@ def get_config_data(handle):
     url = 'https://monyze.ru/api.php'
     try:    
         requests.post(url, json.dumps(config_data))
-        logger.info('Конфигурация устройства:\n' + json.dumps(config_data, indent=4) + '\n ---------------')
+        #logger.info('Конфигурация устройства:\n' + json.dumps(config_data, indent=4) + '\n ---------------')
         logger.info('Конфигурация устройства отправлена')
     except:
         logger.warning("Не удалось отправить конфигурацию устройства")
@@ -457,8 +457,8 @@ def get_load_data(handle):
     url = 'https://monyze.ru/api.php'
     try:
         requests.post(url, json.dumps(load_data))
-        logger.info('Состояние устройства:\n' + json.dumps(load_data, indent=4) + '\n ---------------')
-        logger.info('Jobs done')
+        #logger.info('Состояние устройства:\n' + json.dumps(load_data, indent=4) + '\n ---------------')
+        #logger.info('Jobs done')
     except:
         logger.warning('Ошибка отправки данных load_data')
         logger.warning(traceback.format_exc())
