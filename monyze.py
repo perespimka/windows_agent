@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import servicemanager
+
 import socket
 import sys
 import win32event
@@ -23,12 +23,16 @@ import clr
 import ctypes
 import logging
 import logging.config
+from uptime import uptime
+import servicemanager
 
 c = wmi.WMI()
 
+# ??? Ниже в закаменченном фрагменте просто какой-то кортеж создается, на который нет ссылки.
+'''
 for diskDrive in c.query("SELECT * FROM Win32_DiskDrive"):
-    diskDrive.Size, "\nDisk model: ", diskDrive.Model,  diskDrive.Status
-
+    diskDrive.Size, "\nDisk model: ", diskDrive.Model,  diskDrive.Status 
+'''
 try:
     import _winreg as winreg
 except ImportError as err:
@@ -100,16 +104,15 @@ net_stats = psutil.net_if_stats()
 logger.info ('Переменные определены')
 
 driveinfo = []
-hddpos = 0
 cpu_load = {}
 cpu_cores = []
 
 openhardwaremonitor_hwtypes = ['Mainboard', 'SuperIO', 'CPU','RAM', 'GpuNvidia', 'GpuAti', 'TBalancer', 'Heatmaster', 'HDD']
-cputhermometer_hwtypes = ['Mainboard', 'SuperIO', 'CPU','GpuNvidia', 'GpuAti', 'TBalancer', 'Heatmaster', 'HDD']
 openhardwaremonitor_sensortypes = ['Voltage', 'Clock', 'Temperature', 'Load','Fan', 'Flow', 'Control', 'Level', 'Factor', 'Power', 'Data', 'SmallData']
-cputhermometer_sensortypes = ['Voltage', 'Clock', 'Temperature', 'Load', 'Fan', 'Flow', 'Control', 'Level']
 cpu_load_sensornames = ['CPU Total', 'CPU Core', 'CPU Core #1', 'CPU Core #2','CPU Core #3', 'CPU Core #4', 'CPU Core #5', 'CPU Core #6', 'CPU Core #7', 'CPU Core #8']
 cpu_temperature_sensornames = ['CPU Package', 'CPU Core #1', 'CPU Core #2', 'CPU Core #3','CPU Core #4', 'CPU Core #5', 'CPU Core #6', 'CPU Core #7', 'CPU Core #8']
+mb_temperature_sensornames = ['Temperature #1', 'Temperature #2', 'Temperature #3', 'Temperature #4','Temperature #5', 'Temperature #6', 'Temperature #7', 'Temperature #8']
+mb_fan_sensornames = ['Fan #1', 'Fan #2', 'Fan #3', 'Fan #4','Fan #5', 'Fan #6', 'Fan #7', 'Fan #8','Fan #9', 'Fan #10', 'Fan #11', 'Fan #12']
 
 logger.info ('Инициализация ohwm')
 def initialize_openhardwaremonitor():
@@ -126,20 +129,26 @@ def initialize_openhardwaremonitor():
 
 HardwareHandle = initialize_openhardwaremonitor()
 logger.info ('ohwm инициализирован')
+
 logger.info ('Получаем данные о дисках')
+hddpos = 0
 for pdisk in c.query("SELECT * FROM Win32_DiskDrive"): 
+    #print(pdisk.DeviceID)
     lnames = []
-    if (pdisk.Size is not None):
-        hddpos = hddpos + 1
-        Size = round((int(pdisk.Size)/1024/1024/1024), 2)
+    if pdisk.Size:
+        hddpos += 1
+        Size = round((int(pdisk.Size)/1024 ** 2), 2)
         strcl = pdisk.deviceID.replace("\\", "")
         pdiskcleared = strcl.replace(".PHYSICALDRIVE", "PhysicalDrive")
         for colpartition in c.query('ASSOCIATORS OF {Win32_DiskDrive.DeviceID="' + pdisk.deviceID + '"} WHERE AssocClass = Win32_DiskDriveToDiskPartition'):
             for logical_disk in c.query('ASSOCIATORS OF {Win32_DiskPartition.DeviceID="' + colpartition.DeviceID + '"} WHERE AssocClass = Win32_LogicalDiskToPartition'):
                 lname = logical_disk.DeviceID
-                lnames.append(lname)
-                l = {'hdd_'+str(hddpos)+'': {'name': pdisk.Model,'size': Size, 'LOGICAL': lnames}}
+                if lname:
+                    lnames.append(lname)
+        l = {'hdd_'+str(hddpos)+'': {'name': pdisk.Model,'size': Size, 'LOGICAL': lnames}}
+        #print(l['hdd_'+str(hddpos)+'']['LOGICAL'])
         driveinfo.append(l)
+
 logger.info ('Данные о дисках получены')
 
 def get_config_data(handle):
@@ -149,17 +158,15 @@ def get_config_data(handle):
     for i in handle.Hardware:
         i.Update()
         for sensor in i.Sensors:
-            if sensor.Value is not None:
-                sensortypes = openhardwaremonitor_sensortypes
-                hardwaretypes = openhardwaremonitor_hwtypes
+            if sensor.Value:
                 ###CPU'S###
-                if sensor.Hardware.HardwareType == hardwaretypes.index('CPU'):
+                if sensor.Hardware.HardwareType == openhardwaremonitor_hwtypes.index('CPU'):
                     if sensor.Index == 0 and sensor.SensorType == 3:
-                        c_count = c_count+1
+                        c_count += 1
                         cpuinfo['cpu_'+str(c_count)] = sensor.Hardware.Name
                         break
                     if sensor.Index >= 0:
-                        c_count = c_count+1
+                        c_count += 1
                         cpuinfo['cpu_'+str(c_count)] = sensor.Hardware.Name
                         break
 
@@ -185,9 +192,9 @@ def get_config_data(handle):
                     net['net_'+str((i)+1)] = {'model': model,'name': name, 'speed': speed, 'addr': ip}
         except KeyError:
             continue
+    
     logger.info("Конфигурация устройства инициализирована")
     config_data = {
-
         "id": {
             "user_id": id_user,
             "device_id": id_computer
@@ -210,8 +217,13 @@ def get_config_data(handle):
     }
 
     url = 'https://monyze.ru/api.php'
-    requests.post(url, json.dumps(config_data))
-    logger.info('Конфигурация устройства отправлена')
+    try:    
+        requests.post(url, json.dumps(config_data))
+        logger.info('Конфигурация устройства:\n' + json.dumps(config_data, indent=4) + '\n ---------------')
+        logger.info('Конфигурация устройства отправлена')
+    except:
+        logger.warning("Не удалось отправить конфигурацию устройства")
+        logger.warning(traceback.format_exc())
 
 
 def get_load_data(handle):
@@ -219,74 +231,70 @@ def get_load_data(handle):
     cpu_count = 0
 
     for i in handle.Hardware:
-        sensortypes = openhardwaremonitor_sensortypes
-        hardwaretypes = openhardwaremonitor_hwtypes
-        load_sensornames = cpu_load_sensornames
-        temp_sensornames = cpu_temperature_sensornames
         i.Update()
 
-        ###CPU'S###
-        if i.HardwareType == hardwaretypes.index('CPU'):
+        ###CPU and Fans###
+        if i.HardwareType == openhardwaremonitor_hwtypes.index('CPU'):
             if i.processorIndex == cpu_count:
                 load_arr = {}
                 temp_arr = {}
                 cpu_load_widg_arr = []
                 cpu_temp_widg_arr = []
-                cpu_count = cpu_count + 1
+                cpu_count += 1
                 cpu_load_data = {}
                 for sensor in i.Sensors:
-                    if sensor.Value is not None:
-                        #Сенсоры загрузки CPU
-                        if sensor.SensorType == sensortypes.index('Load'):
-                            if sensor.Name == load_sensornames[0] or sensor.Name == load_sensornames[1]:
+                    if sensor.Value:
+                        #CPU Load Sensors
+                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Load'):
+                            if sensor.Name == cpu_load_sensornames[0] or sensor.Name == cpu_load_sensornames[1]:
                                 load_arr['total'] = round(sensor.Value)
                                 cpu_load_widg_arr.append(round(sensor.Value))
-                            if sensor.Name == load_sensornames[2]:
+                            elif sensor.Name == cpu_load_sensornames[2]:
                                 load_arr['core_1'] = round(sensor.Value)
-                            if sensor.Name == load_sensornames[3]:
+                            elif sensor.Name == cpu_load_sensornames[3]:
                                 load_arr['core_2'] = round(sensor.Value)
-                            if sensor.Name == load_sensornames[4]:
+                            elif sensor.Name == cpu_load_sensornames[4]:
                                 load_arr['core_3'] = round(sensor.Value)
-                            if sensor.Name == load_sensornames[5]:
+                            elif sensor.Name == cpu_load_sensornames[5]:
                                 load_arr['core_4'] = round(sensor.Value)
-                            if sensor.Name == load_sensornames[6]:
+                            elif sensor.Name == cpu_load_sensornames[6]:
                                 load_arr['core_5'] = round(sensor.Value)
-                            if sensor.Name == load_sensornames[7]:
+                            elif sensor.Name == cpu_load_sensornames[7]:
                                 load_arr['core_6'] = round(sensor.Value)
-                            if sensor.Name == load_sensornames[8]:
+                            elif sensor.Name == cpu_load_sensornames[8]:
                                 load_arr['core_7'] = round(sensor.Value)
-                            if sensor.Name == load_sensornames[9]:
+                            elif sensor.Name == cpu_load_sensornames[9]:
                                 load_arr['core_8'] = round(sensor.Value)
-                        #Сенсоры температуры CPU
-                        if sensor.SensorType == sensortypes.index('Temperature'):
-                            if sensor.Name == temp_sensornames[0]:
+                        #CPU Temperature sensors
+                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Temperature'):
+                            if sensor.Name == cpu_temperature_sensornames[0]:
                                 temp_arr['total'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            if sensor.Name == temp_sensornames[1]:
+                            elif sensor.Name == cpu_temperature_sensornames[1]:
                                 temp_arr['core_1'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            if sensor.Name == temp_sensornames[2]:
+                            elif sensor.Name == cpu_temperature_sensornames[2]:
                                 temp_arr['core_2'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            if sensor.Name == temp_sensornames[3]:
+                            elif sensor.Name == cpu_temperature_sensornames[3]:
                                 temp_arr['core_3'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            if sensor.Name == temp_sensornames[4]:
+                            elif sensor.Name == cpu_temperature_sensornames[4]:
                                 temp_arr['core_4'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            if sensor.Name == temp_sensornames[5]:
+                            elif sensor.Name == cpu_temperature_sensornames[5]:
                                 temp_arr['core_5'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            if sensor.Name == temp_sensornames[6]:
+                            elif sensor.Name == cpu_temperature_sensornames[6]:
                                 temp_arr['core_6'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            if sensor.Name == temp_sensornames[7]:
+                            elif sensor.Name == cpu_temperature_sensornames[7]:
                                 temp_arr['core_7'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            if sensor.Name == temp_sensornames[8]:
+                            elif sensor.Name == cpu_temperature_sensornames[8]:
                                 temp_arr['core_8'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                        if sensor.SensorType == sensortypes.index('Clock'):
+                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Clock'):
                             continue
                     cpu_load_data['load'] = load_arr
                     cpu_load_data['temp'] = temp_arr
@@ -299,6 +307,60 @@ def get_load_data(handle):
                 else:
                     cpu_total_temp_widg = round(
                         sum(cpu_temp_widg_arr)/len(cpu_temp_widg_arr))
+        
+    ##Fans & MB Temperature
+        if i.HardwareType == openhardwaremonitor_hwtypes.index('Mainboard'):
+            mb_data = {}
+            mb_temp_arr = {}
+            mb_fan_arr = {}
+            for SHardware in i.SubHardware:
+                SHardware.Update()
+                for sensor in SHardware.Sensors:
+                    if sensor.Value:
+                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Temperature'):
+                            if sensor.Name == mb_temperature_sensornames[0]:
+                                    mb_temp_arr['temp_1'] = round(sensor.Value)
+                            elif sensor.Name == mb_temperature_sensornames[1]:
+                                    mb_temp_arr['temp_2'] = round(sensor.Value)
+                            elif sensor.Name == mb_temperature_sensornames[2]:
+                                    mb_temp_arr['temp_3'] = round(sensor.Value)
+                            elif sensor.Name == mb_temperature_sensornames[3]:
+                                    mb_temp_arr['temp_4'] = round(sensor.Value)
+                            elif sensor.Name == mb_temperature_sensornames[4]:
+                                    mb_temp_arr['temp_5'] = round(sensor.Value)
+                            elif sensor.Name == mb_temperature_sensornames[5]:
+                                    mb_temp_arr['temp_6'] = round(sensor.Value)
+                            elif sensor.Name == mb_temperature_sensornames[6]:
+                                    mb_temp_arr['temp_7'] = round(sensor.Value)
+                            elif sensor.Name == mb_temperature_sensornames[7]:
+                                    mb_temp_arr['temp_8'] = round(sensor.Value)
+                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Fan'):
+                            if sensor.Name == mb_fan_sensornames[0]:
+                                    mb_fan_arr['fan_1'] = round(sensor.Value)
+                            elif sensor.Name == mb_fan_sensornames[1]:
+                                    mb_fan_arr['fan_2'] = round(sensor.Value)
+                            elif sensor.Name == mb_fan_sensornames[2]:
+                                    mb_fan_arr['fan_3'] = round(sensor.Value)
+                            elif sensor.Name == mb_fan_sensornames[3]:
+                                    mb_fan_arr['fan_4'] = round(sensor.Value)
+                            elif sensor.Name == mb_fan_sensornames[4]:
+                                    mb_fan_arr['fan_5'] = round(sensor.Value)
+                            elif sensor.Name == mb_fan_sensornames[5]:
+                                    mb_fan_arr['fan_6'] = round(sensor.Value)
+                            elif sensor.Name == mb_fan_sensornames[6]:
+                                    mb_fan_arr['fan_7'] = round(sensor.Value)
+                            elif sensor.Name == mb_fan_sensornames[7]:
+                                    mb_fan_arr['fan_8'] = round(sensor.Value)
+                            elif sensor.Name == mb_fan_sensornames[8]:
+                                    mb_fan_arr['fan_9'] = round(sensor.Value)
+                            elif sensor.Name == mb_fan_sensornames[9]:
+                                    mb_fan_arr['fan_10'] = round(sensor.Value)
+
+                mb_data['temp'] = mb_temp_arr
+                mb_data['fans'] = mb_fan_arr 
+
+
+
 
     ram = {"load": round(memory.percent), "AvailPh": memory.available}
 
@@ -306,20 +368,23 @@ def get_load_data(handle):
     hdd = {}
     hdd_widgets = {}
     hddpos = 0
+    #print(driveinfo)
+    #print('------------------------------------------------------------------------------------------------')
     for disk in driveinfo:
-        hddpos = hddpos + 1
+        hddpos += 1
         ldisks = []
         ldisks_widgets = []
         hdd_count = 'hdd_'+str(hddpos)+''
         for ld in disk[hdd_count]['LOGICAL']:
-            usage = psutil.disk_usage(ld)
-            perc = usage.percent
-            free = round((int(usage.free)/1024/1024/1024), 2)
-            used = round((int(usage.used)/1024/1024/1024), 2)
-            l = {'ldisk': ld, 'load': round(perc), 'free': free, 'used': used}
-            lw = {'ldisk': ld, 'load': round(perc)}
-            ldisks.append(l)
-            ldisks_widgets.append(lw)
+            if ld:
+                usage = psutil.disk_usage(ld)
+                perc = usage.percent
+                free = round((int(usage.free)/1024 ** 2), 2)
+                used = round((int(usage.used)/1024 ** 2), 2)
+                l = {'ldisk': ld, 'load': round(perc), 'free': free, 'used': used}
+                lw = {'ldisk': ld, 'load': round(perc)}
+                ldisks.append(l)
+                ldisks_widgets.append(lw)
         x = {'ldisks': ldisks}
         xw = {'ldisks': ldisks_widgets}
 
@@ -352,12 +417,19 @@ def get_load_data(handle):
                     net_io = psutil.net_io_counters(pernic=True)
                     time.sleep(1)
                     net_io_1 = psutil.net_io_counters(pernic=True)
-                    rx = round((net_io_1[netname][1] -net_io[netname][1]) / 1024 / 1024., 4)
-                    tx = round((net_io_1[netname][0] -net_io[netname][0]) / 1024 / 1024., 4)
+                    rx = round((net_io_1[netname][1] -net_io[netname][1]) / 1024 ** 2., 4)
+                    tx = round((net_io_1[netname][0] -net_io[netname][0]) / 1024 ** 2., 4)
                     n = {'btx': btx, 'brx': brx, 'ptx': ptx,'prx': prx, 'tx': tx, 'rx': rx}
                     net[net_count] = (n)
         except KeyError:
             continue
+    ###uptime###
+    seconds = round(uptime())
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    upt = str(days) + 'd ' + str(hours) + 'h ' + str(minutes) + 'm ' + str(seconds) + 's'    
+    
     load_data = {
         "id": {
             "user_id": id_user,
@@ -368,23 +440,37 @@ def get_load_data(handle):
             "cpu": cpu_load,
             "ram": ram,
             "hdd": hdd,
-            "net": net
+            "net": net,
+            "mb": mb_data
         },
         "widgets": {
             "cpu_load": cpu_total_load_widg,
             "cpu_temp": cpu_total_temp_widg,
             "ram_load": round(memory.percent),
-            "hdd_load": hdd_widgets
+            "hdd_load": hdd_widgets,
+            "mb_temp": mb_temp_arr,
+            "mb_fans": mb_fan_arr,
+            "uptime":upt
         }
     }
 
     url = 'https://monyze.ru/api.php'
     try:
         requests.post(url, json.dumps(load_data))
+        logger.info('Состояние устройства:\n' + json.dumps(load_data, indent=4) + '\n ---------------')
+        logger.info('Jobs done')
     except:
         logger.warning('Ошибка отправки данных load_data')
+        logger.warning(traceback.format_exc())
         pass
 
+'''
+get_config_data(HardwareHandle)
+
+#print('------------------------------------------------------------------------------------------------')
+
+get_load_data(HardwareHandle)
+'''
 class monyze_agent(win32serviceutil.ServiceFramework):
     _svc_name_ = "monyze_agent"
     _svc_display_name_ = "Monyze agent service"
@@ -398,8 +484,8 @@ class monyze_agent(win32serviceutil.ServiceFramework):
             get_config_data(HardwareHandle)
             logger.info('Служба запущена')
         except:
-            logger.warning("Не удалось отправить конфигурацию устройства", traceback.format_exc())
-        
+            logger.warning("Не удалось запустить службу")
+            logger.warning(traceback.format_exc())
       
     def SvcStop(self):
         logger.info('Остановка службы')
@@ -408,13 +494,14 @@ class monyze_agent(win32serviceutil.ServiceFramework):
 
     def SvcDoRun(self):
         rc = None
+        #get_config_data(HardwareHandle)
         logger.info('Отправка данных')
         while rc != win32event.WAIT_OBJECT_0:
             try:
                 get_load_data(HardwareHandle)
                 rc = win32event.WaitForSingleObject(self.hWaitStop, 5000)
             except:
-                logger.warning("Ошибка в Svc_do_run - get_load_data")
+                logger.warning("Ошибка в SvcDoRun - get_load_data")
                 logger.warning(traceback.format_exc())
                 pass
 
