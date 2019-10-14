@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+import servicemanager
 import socket
 import sys
 import win32event
@@ -23,16 +23,10 @@ import clr
 import ctypes
 import logging
 import logging.config
-from uptime import uptime
-import servicemanager
 
 c = wmi.WMI()
 
-# ??? Ниже в закаменченном фрагменте просто какой-то кортеж создается, на который нет ссылки.
-'''
-for diskDrive in c.query("SELECT * FROM Win32_DiskDrive"):
-    diskDrive.Size, "\nDisk model: ", diskDrive.Model,  diskDrive.Status 
-'''
+
 try:
     import _winreg as winreg
 except ImportError as err:
@@ -78,7 +72,7 @@ logging.config.dictConfig(logConfig)
 logger = logging.getLogger("monyze.main")
 
 
-ohwm_dll = os.path.join(dll_path,"OpenHardwareMonitorLib.dll")
+ohwm_dll = "C:\\monyze_windows\\OpenHardwareMonitorLib.dll"
 
 logger.info ('------------------------------------- ')
 logger.info ('Запуск агента')
@@ -130,27 +124,6 @@ def initialize_openhardwaremonitor():
 HardwareHandle = initialize_openhardwaremonitor()
 logger.info ('ohwm инициализирован')
 
-logger.info ('Получаем данные о дисках')
-hddpos = 0
-for pdisk in c.query("SELECT * FROM Win32_DiskDrive"): 
-    #print(pdisk.DeviceID)
-    lnames = []
-    if pdisk.Size:
-        hddpos += 1
-        Size = round((int(pdisk.Size)/1024 ** 2), 2)
-        strcl = pdisk.deviceID.replace("\\", "")
-        pdiskcleared = strcl.replace(".PHYSICALDRIVE", "PhysicalDrive")
-        for colpartition in c.query('ASSOCIATORS OF {Win32_DiskDrive.DeviceID="' + pdisk.deviceID + '"} WHERE AssocClass = Win32_DiskDriveToDiskPartition'):
-            for logical_disk in c.query('ASSOCIATORS OF {Win32_DiskPartition.DeviceID="' + colpartition.DeviceID + '"} WHERE AssocClass = Win32_LogicalDiskToPartition'):
-                lname = logical_disk.DeviceID
-                if lname:
-                    lnames.append(lname)
-        l = {'hdd_'+str(hddpos)+'': {'name': pdisk.Model,'size': Size, 'LOGICAL': lnames}}
-        #print(l['hdd_'+str(hddpos)+'']['LOGICAL'])
-        driveinfo.append(l)
-
-logger.info ('Данные о дисках получены')
-
 def get_config_data(handle):
     logger.info ('Инициализируем конфигурацию устройства')
     cpuinfo = {}
@@ -159,8 +132,10 @@ def get_config_data(handle):
         i.Update()
         for sensor in i.Sensors:
             if sensor.Value:
+                sensortypes = openhardwaremonitor_sensortypes
+                hardwaretypes = openhardwaremonitor_hwtypes
                 ###CPU'S###
-                if sensor.Hardware.HardwareType == openhardwaremonitor_hwtypes.index('CPU'):
+                if sensor.Hardware.HardwareType == hardwaretypes.index('CPU'):
                     if sensor.Index == 0 and sensor.SensorType == 3:
                         c_count += 1
                         cpuinfo['cpu_'+str(c_count)] = sensor.Hardware.Name
@@ -193,6 +168,24 @@ def get_config_data(handle):
         except KeyError:
             continue
     
+    logger.info ('Получаем данные о дисках')
+    hddpos = 0
+    for pdisk in c.query("SELECT * FROM Win32_DiskDrive"): 
+        lnames = []
+        if pdisk.Size:
+            hddpos += 1
+            Size = round((int(pdisk.Size)/1024 ** 2), 2)
+            strcl = pdisk.deviceID.replace("\\", "")
+            pdiskcleared = strcl.replace(".PHYSICALDRIVE", "PhysicalDrive")
+            for colpartition in c.query('ASSOCIATORS OF {Win32_DiskDrive.DeviceID="' + pdisk.deviceID + '"} WHERE AssocClass = Win32_DiskDriveToDiskPartition'):
+                for logical_disk in c.query('ASSOCIATORS OF {Win32_DiskPartition.DeviceID="' + colpartition.DeviceID + '"} WHERE AssocClass = Win32_LogicalDiskToPartition'):
+                    lname = logical_disk.DeviceID
+                    if lname:
+                        lnames.append(lname)
+            l = {'hdd_'+str(hddpos)+'': {'name': pdisk.Model,'size': Size, 'LOGICAL': lnames}}
+            driveinfo.append(l)
+            
+    logger.info ('Данные о дисках получены')
     logger.info("Конфигурация устройства инициализирована")
     config_data = {
         "id": {
@@ -217,13 +210,9 @@ def get_config_data(handle):
     }
 
     url = 'https://monyze.ru/api.php'
-    try:    
-        requests.post(url, json.dumps(config_data))
-        #logger.info('Конфигурация устройства:\n' + json.dumps(config_data, indent=4) + '\n ---------------')
-        logger.info('Конфигурация устройства отправлена')
-    except:
-        logger.warning("Не удалось отправить конфигурацию устройства")
-        logger.warning(traceback.format_exc())
+    requests.post(url, json.dumps(config_data))
+    #print(json.dumps(config_data))
+    logger.info('Конфигурация устройства отправлена')
 
 
 def get_load_data(handle):
@@ -231,10 +220,14 @@ def get_load_data(handle):
     cpu_count = 0
 
     for i in handle.Hardware:
+        sensortypes = openhardwaremonitor_sensortypes
+        hardwaretypes = openhardwaremonitor_hwtypes
+        load_sensornames = cpu_load_sensornames
+        temp_sensornames = cpu_temperature_sensornames
         i.Update()
 
         ###CPU and Fans###
-        if i.HardwareType == openhardwaremonitor_hwtypes.index('CPU'):
+        if i.HardwareType == hardwaretypes.index('CPU'):
             if i.processorIndex == cpu_count:
                 load_arr = {}
                 temp_arr = {}
@@ -245,56 +238,56 @@ def get_load_data(handle):
                 for sensor in i.Sensors:
                     if sensor.Value:
                         #CPU Load Sensors
-                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Load'):
-                            if sensor.Name == cpu_load_sensornames[0] or sensor.Name == cpu_load_sensornames[1]:
+                        if sensor.SensorType == sensortypes.index('Load'):
+                            if sensor.Name == load_sensornames[0] or sensor.Name == load_sensornames[1]:
                                 load_arr['total'] = round(sensor.Value)
                                 cpu_load_widg_arr.append(round(sensor.Value))
-                            elif sensor.Name == cpu_load_sensornames[2]:
+                            elif sensor.Name == load_sensornames[2]:
                                 load_arr['core_1'] = round(sensor.Value)
-                            elif sensor.Name == cpu_load_sensornames[3]:
+                            elif sensor.Name == load_sensornames[3]:
                                 load_arr['core_2'] = round(sensor.Value)
-                            elif sensor.Name == cpu_load_sensornames[4]:
+                            elif sensor.Name == load_sensornames[4]:
                                 load_arr['core_3'] = round(sensor.Value)
-                            elif sensor.Name == cpu_load_sensornames[5]:
+                            elif sensor.Name == load_sensornames[5]:
                                 load_arr['core_4'] = round(sensor.Value)
-                            elif sensor.Name == cpu_load_sensornames[6]:
+                            elif sensor.Name == load_sensornames[6]:
                                 load_arr['core_5'] = round(sensor.Value)
-                            elif sensor.Name == cpu_load_sensornames[7]:
+                            elif sensor.Name == load_sensornames[7]:
                                 load_arr['core_6'] = round(sensor.Value)
-                            elif sensor.Name == cpu_load_sensornames[8]:
+                            elif sensor.Name == load_sensornames[8]:
                                 load_arr['core_7'] = round(sensor.Value)
-                            elif sensor.Name == cpu_load_sensornames[9]:
+                            elif sensor.Name == load_sensornames[9]:
                                 load_arr['core_8'] = round(sensor.Value)
                         #CPU Temperature sensors
-                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Temperature'):
-                            if sensor.Name == cpu_temperature_sensornames[0]:
+                        elif sensor.SensorType == sensortypes.index('Temperature'):
+                            if sensor.Name == temp_sensornames[0]:
                                 temp_arr['total'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            elif sensor.Name == cpu_temperature_sensornames[1]:
+                            elif sensor.Name == temp_sensornames[1]:
                                 temp_arr['core_1'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            elif sensor.Name == cpu_temperature_sensornames[2]:
+                            elif sensor.Name == temp_sensornames[2]:
                                 temp_arr['core_2'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            elif sensor.Name == cpu_temperature_sensornames[3]:
+                            elif sensor.Name == temp_sensornames[3]:
                                 temp_arr['core_3'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            elif sensor.Name == cpu_temperature_sensornames[4]:
+                            elif sensor.Name == temp_sensornames[4]:
                                 temp_arr['core_4'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            elif sensor.Name == cpu_temperature_sensornames[5]:
+                            elif sensor.Name == temp_sensornames[5]:
                                 temp_arr['core_5'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            elif sensor.Name == cpu_temperature_sensornames[6]:
+                            elif sensor.Name == temp_sensornames[6]:
                                 temp_arr['core_6'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            elif sensor.Name == cpu_temperature_sensornames[7]:
+                            elif sensor.Name == temp_sensornames[7]:
                                 temp_arr['core_7'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                            elif sensor.Name == cpu_temperature_sensornames[8]:
+                            elif sensor.Name == temp_sensornames[8]:
                                 temp_arr['core_8'] = round(sensor.Value)
                                 cpu_temp_widg_arr.append(round(sensor.Value))
-                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Clock'):
+                        elif sensor.SensorType == sensortypes.index('Clock'):
                             continue
                     cpu_load_data['load'] = load_arr
                     cpu_load_data['temp'] = temp_arr
@@ -309,7 +302,7 @@ def get_load_data(handle):
                         sum(cpu_temp_widg_arr)/len(cpu_temp_widg_arr))
         
     ##Fans & MB Temperature
-        if i.HardwareType == openhardwaremonitor_hwtypes.index('Mainboard'):
+        if i.HardwareType == hardwaretypes.index('Mainboard'):
             mb_data = {}
             mb_temp_arr = {}
             mb_fan_arr = {}
@@ -317,7 +310,7 @@ def get_load_data(handle):
                 SHardware.Update()
                 for sensor in SHardware.Sensors:
                     if sensor.Value:
-                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Temperature'):
+                        if sensor.SensorType == sensortypes.index('Temperature'):
                             if sensor.Name == mb_temperature_sensornames[0]:
                                     mb_temp_arr['temp_1'] = round(sensor.Value)
                             elif sensor.Name == mb_temperature_sensornames[1]:
@@ -334,7 +327,7 @@ def get_load_data(handle):
                                     mb_temp_arr['temp_7'] = round(sensor.Value)
                             elif sensor.Name == mb_temperature_sensornames[7]:
                                     mb_temp_arr['temp_8'] = round(sensor.Value)
-                        if sensor.SensorType == openhardwaremonitor_sensortypes.index('Fan'):
+                        elif sensor.SensorType == sensortypes.index('Fan'):
                             if sensor.Name == mb_fan_sensornames[0]:
                                     mb_fan_arr['fan_1'] = round(sensor.Value)
                             elif sensor.Name == mb_fan_sensornames[1]:
@@ -368,8 +361,6 @@ def get_load_data(handle):
     hdd = {}
     hdd_widgets = {}
     hddpos = 0
-    #print(driveinfo)
-    #print('------------------------------------------------------------------------------------------------')
     for disk in driveinfo:
         hddpos += 1
         ldisks = []
@@ -423,13 +414,6 @@ def get_load_data(handle):
                     net[net_count] = (n)
         except KeyError:
             continue
-    ###uptime###
-    seconds = round(uptime())
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    days, hours = divmod(hours, 24)
-    upt = str(days) + 'd ' + str(hours) + 'h ' + str(minutes) + 'm ' + str(seconds) + 's'    
-    
     load_data = {
         "id": {
             "user_id": id_user,
@@ -449,66 +433,57 @@ def get_load_data(handle):
             "ram_load": round(memory.percent),
             "hdd_load": hdd_widgets,
             "mb_temp": mb_temp_arr,
-            "mb_fans": mb_fan_arr,
-            "uptime":upt
+            "mb_fans": mb_fan_arr
         }
     }
 
     url = 'https://monyze.ru/api.php'
     try:
         requests.post(url, json.dumps(load_data))
-        #logger.info('Состояние устройства:\n' + json.dumps(load_data, indent=4) + '\n ---------------')
-        #logger.info('Jobs done')
+        logger.info('load_data отправлена')
+        #logger.info(json.dumps(load_data))
+        #print(json.dumps(load_data))
     except:
         logger.warning('Ошибка отправки данных load_data')
         logger.warning(traceback.format_exc())
         pass
 
-'''
-get_config_data(HardwareHandle)
+#get_config_data(HardwareHandle)
+#get_load_data(HardwareHandle)
 
-#print('------------------------------------------------------------------------------------------------')
 
-get_load_data(HardwareHandle)
-'''
-class monyze_agent(win32serviceutil.ServiceFramework):
-    _svc_name_ = "monyze_agent"
-    _svc_display_name_ = "Monyze agent service"
+class TestService(win32serviceutil.ServiceFramework):
+    _svc_name_ = "TestService"
+    _svc_display_name_ = "Test Service"
 
     def __init__(self, args):
-        logger.info('Запуск службы')
         win32serviceutil.ServiceFramework.__init__(self, args)
         self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
         socket.setdefaulttimeout(60)
-        try:
-            get_config_data(HardwareHandle)
-            logger.info('Служба запущена')
-        except:
-            logger.warning("Не удалось запустить службу")
-            logger.warning(traceback.format_exc())
-      
+
     def SvcStop(self):
-        logger.info('Остановка службы')
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         win32event.SetEvent(self.hWaitStop)
 
     def SvcDoRun(self):
         rc = None
-        #get_config_data(HardwareHandle)
-        logger.info('Отправка данных')
+        try:
+            get_config_data(HardwareHandle)
+        except:
+            logger.info('Ошибка в get_config')
         while rc != win32event.WAIT_OBJECT_0:
             try:
                 get_load_data(HardwareHandle)
-                rc = win32event.WaitForSingleObject(self.hWaitStop, 5000)
             except:
-                logger.warning("Ошибка в SvcDoRun - get_load_data")
-                logger.warning(traceback.format_exc())
-                pass
+                logger.info('Ошибка в get_load')
+            rc = win32event.WaitForSingleObject(self.hWaitStop, 5000)
+
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
         servicemanager.Initialize()
-        servicemanager.PrepareToHostSingle(monyze_agent)
+        servicemanager.PrepareToHostSingle(TestService)
         servicemanager.StartServiceCtrlDispatcher()
     else:
-        win32serviceutil.HandleCommandLine(monyze_agent)
+        win32serviceutil.HandleCommandLine(TestService)
+
