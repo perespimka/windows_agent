@@ -23,6 +23,8 @@ import clr
 import ctypes
 import logging
 import logging.config
+import platform
+import shutil
 
 c = wmi.WMI()
 
@@ -36,14 +38,32 @@ except ImportError as err:
         pass
 
 workdir = os.path.dirname(os.path.abspath(__file__))
-config = os.path.join(workdir,"config.ini")
+monyze_config = "monyze_config.ini"
+config = os.path.join(workdir, monyze_config)
 
-f = open(config, 'r')
-id_user = f.readline().rstrip('\n')
-id_computer = f.readline().rstrip('\n')
-dll_path = f.readline().rstrip('\n')
-f.close()
+windir = os.environ['WINDIR']
+is_64bits = platform.architecture()[0].find('64') != -1
+if is_64bits:
+    sys_directory = windir + r'\system32'
+else:
+    sys_directory = windir + r'\sysWOW64'
+service_config = os.path.join(sys_directory, "monyze_config.ini" )
+if not os.path.isfile(service_config):
+    shutil.copy(config, sys_directory )
+config = service_config
 
+
+
+
+with open(config) as f:
+    id_user = f.readline().rstrip()
+    id_computer = f.readline().rstrip()
+    dll_path = f.readline().rstrip()
+'''
+id_user = '4080334769ed144496550ba6bab02342'
+id_computer = 'cb149a7c1140b45a274616d85b2d4fb2'
+dll_path = r'c:\monyze_windows'
+'''
 #logging
 logConfig = {
         "version":1,
@@ -175,8 +195,6 @@ def get_config_data(handle):
         if pdisk.Size:
             hddpos += 1
             Size = round((int(pdisk.Size)/1024 ** 2), 2)
-            strcl = pdisk.deviceID.replace("\\", "")
-            pdiskcleared = strcl.replace(".PHYSICALDRIVE", "PhysicalDrive")
             for colpartition in c.query('ASSOCIATORS OF {Win32_DiskDrive.DeviceID="' + pdisk.deviceID + '"} WHERE AssocClass = Win32_DiskDriveToDiskPartition'):
                 for logical_disk in c.query('ASSOCIATORS OF {Win32_DiskPartition.DeviceID="' + colpartition.DeviceID + '"} WHERE AssocClass = Win32_LogicalDiskToPartition'):
                     lname = logical_disk.DeviceID
@@ -211,7 +229,6 @@ def get_config_data(handle):
 
     url = 'https://monyze.ru/api.php'
     requests.post(url, json.dumps(config_data))
-    #print(json.dumps(config_data))
     logger.info('Конфигурация устройства отправлена')
 
 
@@ -441,20 +458,17 @@ def get_load_data(handle):
     try:
         requests.post(url, json.dumps(load_data))
         logger.info('load_data отправлена')
-        #logger.info(json.dumps(load_data))
-        #print(json.dumps(load_data))
     except:
         logger.warning('Ошибка отправки данных load_data')
         logger.warning(traceback.format_exc())
-        pass
-
-#get_config_data(HardwareHandle)
-#get_load_data(HardwareHandle)
+  
 
 
-class TestService(win32serviceutil.ServiceFramework):
-    _svc_name_ = "TestService"
-    _svc_display_name_ = "Test Service"
+
+
+class MonyzeAgent(win32serviceutil.ServiceFramework):
+    _svc_name_ = "MonyzeAgent"
+    _svc_display_name_ = "Monyze Agent Service"
 
     def __init__(self, args):
         win32serviceutil.ServiceFramework.__init__(self, args)
@@ -482,8 +496,8 @@ class TestService(win32serviceutil.ServiceFramework):
 if __name__ == '__main__':
     if len(sys.argv) == 1:
         servicemanager.Initialize()
-        servicemanager.PrepareToHostSingle(TestService)
+        servicemanager.PrepareToHostSingle(MonyzeAgent)
         servicemanager.StartServiceCtrlDispatcher()
     else:
-        win32serviceutil.HandleCommandLine(TestService)
+        win32serviceutil.HandleCommandLine(MonyzeAgent)
 
