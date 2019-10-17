@@ -25,6 +25,7 @@ import logging
 import logging.config
 import platform
 import shutil
+import traceback
 
 c = wmi.WMI()
 
@@ -41,6 +42,7 @@ workdir = os.path.dirname(os.path.abspath(__file__))
 monyze_config = "monyze_config.ini"
 config = os.path.join(workdir, monyze_config)
 
+#Проверяем версию системы. Копируем в системную папку конфигфайл.
 windir = os.environ['WINDIR']
 is_64bits = platform.architecture()[0].find('64') != -1
 if is_64bits:
@@ -228,6 +230,7 @@ def get_config_data(handle):
     }
 
     url = 'https://monyze.ru/api.php'
+    #print(json.dumps(config_data, indent=4))  
     requests.post(url, json.dumps(config_data))
     logger.info('Конфигурация устройства отправлена')
 
@@ -461,10 +464,14 @@ def get_load_data(handle):
     except:
         logger.warning('Ошибка отправки данных load_data')
         logger.warning(traceback.format_exc())
-  
 
 
+try:
+    get_config_data(HardwareHandle)
+except:
+    logger.info(traceback.format_exc())
 
+#get_config_data(HardwareHandle)
 
 class MonyzeAgent(win32serviceutil.ServiceFramework):
     _svc_name_ = "MonyzeAgent"
@@ -481,10 +488,12 @@ class MonyzeAgent(win32serviceutil.ServiceFramework):
 
     def SvcDoRun(self):
         rc = None
+        '''
         try:
             get_config_data(HardwareHandle)
         except:
-            logger.info('Ошибка в get_config')
+            logger.info(traceback.format_exc())
+        '''
         while rc != win32event.WAIT_OBJECT_0:
             try:
                 get_load_data(HardwareHandle)
