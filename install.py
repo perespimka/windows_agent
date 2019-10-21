@@ -6,6 +6,7 @@ import shutil
     monyze_config.ini
     monyze.exe
     OpenHardwareMonitorLib.dll
+    keys.key
 '''
 #Пути к файлам в директории установочника
 workdir = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +21,7 @@ install_path = os.path.normpath(install_path)
 
 #Определяем директорию для установки (по умолчанию в program files\Monyze), создаем новую, если необходимо
 while True:
-    is_default_path = input('Do you want to install to ' + install_path + ' (y/n)')
+    is_default_path = input('Do you want to install to ' + install_path + ' ? (y/n)')
     if is_default_path.lower() != 'y':
         user_path = input('Input directory name:')
         user_path = os.path.normpath(user_path)
@@ -42,17 +43,24 @@ print('Installing to: ' + install_path)
 
 #Перезаписываем конфиг файл с новой установочной директорией (перезаписываем сразу в место установки)
 lines = []
-with open(monyze_config) as f:
+with open(os.path.join(workdir, 'keys.key')) as f:
     for line in f:
         lines.append(line)
-lines[2] = install_path
+lines[1] += '\n'
+lines.append(install_path)
 with open(os.path.join(install_path, 'monyze_config.ini'), 'w') as f:
     for line in lines:
         f.write(line)
 
 #Копируем библиотеку и exe в новую директорию
-shutil.copy(ohwm_dll, install_path)
-shutil.copy(monyze_exe, install_path)
+try:
+    shutil.copy(ohwm_dll, install_path)
+    shutil.copy(monyze_exe, install_path)
+except:
+    print('Service is work now. Stopping it.')
+    os.chdir(install_path)
+    os.system('monyze.exe' + ' stop')
+
 
 #Устанавливаем и запускаем службу
 new_monyze_exe = os.path.join(install_path, 'monyze.exe')
