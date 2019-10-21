@@ -61,11 +61,8 @@ with open(config) as f:
     id_user = f.readline().rstrip()
     id_computer = f.readline().rstrip()
     dll_path = f.readline().rstrip()
-'''
-id_user = '4080334769ed144496550ba6bab02342'
-id_computer = 'cb149a7c1140b45a274616d85b2d4fb2'
-dll_path = r'c:\monyze_windows'
-'''
+
+
 #logging
 logConfig = {
         "version":1,
