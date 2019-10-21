@@ -1,5 +1,6 @@
 import os
 import shutil
+import platform
 
 '''
 В папке с установщиком должны находится файлы:
@@ -46,21 +47,34 @@ lines = []
 with open(os.path.join(workdir, 'keys.key')) as f:
     for line in f:
         lines.append(line)
-lines[1] += '\n'
+lines[1] += '\n' #В keys.key не добавляется новая строка в конце второго ключа, делаем это тут
 lines.append(install_path)
-with open(os.path.join(install_path, 'monyze_config.ini'), 'w') as f:
+new_config = os.path.join(install_path, 'monyze_config.ini')#Ссыла на новый конфиг
+with open(new_config, 'w') as f:
     for line in lines:
         f.write(line)
 
-#Копируем библиотеку и exe в новую директорию
+#Копируем библиотеку и exe в новую директорию. Определяем версию windows и копируем в системную попку конфиг
+windir = os.environ['WINDIR']
+is_64bits = platform.architecture()[0].find('64') != -1
+if is_64bits:
+    sys_directory = windir + r'\system32'
+else:
+    sys_directory = windir + r'\sysWOW64'
+
+
 try:
     shutil.copy(ohwm_dll, install_path)
     shutil.copy(monyze_exe, install_path)
+    shutil.copy(new_config, sys_directory)
 except:
     print('Service is work now. Stopping it.')
     os.chdir(install_path)
     os.system('monyze.exe' + ' stop')
-
+    try:
+        shutil.copy(new_config, sys_directory)
+    except:
+        print('Cant copy config file to system directory')
 
 #Устанавливаем и запускаем службу
 new_monyze_exe = os.path.join(install_path, 'monyze.exe')
