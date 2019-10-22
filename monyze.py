@@ -91,11 +91,14 @@ logging.config.dictConfig(logConfig)
 logger = logging.getLogger("monyze.main")
 
 
-ohwm_dll = "C:\\monyze_windows\\OpenHardwareMonitorLib.dll"
+ohwm_dll = os.path.join(dll_path, 'OpenHardwareMonitorLib.dll')
 
 logger.info ('------------------------------------- ')
-logger.info ('Запуск агента')
-logger.info ("Путь к библиотеке ohwm: "+ohwm_dll)
+logger.info ('Agent starting')
+try:
+    logger.info ("OpenHardwareMonitorLib.dll path: " + ohwm_dll)
+except:
+    pass
 
 pp = pprint.PrettyPrinter(indent=4)
 nodename = platform.node()
@@ -114,7 +117,7 @@ interfaces = netifaces.interfaces()
 adapters = ifaddr.get_adapters()
 net_stats = psutil.net_if_stats()
 
-logger.info ('Переменные определены')
+logger.info ('Variables defined')
 
 driveinfo = []
 cpu_load = {}
@@ -127,7 +130,7 @@ cpu_temperature_sensornames = ['CPU Package', 'CPU Core #1', 'CPU Core #2', 'CPU
 mb_temperature_sensornames = ['Temperature #1', 'Temperature #2', 'Temperature #3', 'Temperature #4','Temperature #5', 'Temperature #6', 'Temperature #7', 'Temperature #8']
 mb_fan_sensornames = ['Fan #1', 'Fan #2', 'Fan #3', 'Fan #4','Fan #5', 'Fan #6', 'Fan #7', 'Fan #8','Fan #9', 'Fan #10', 'Fan #11', 'Fan #12']
 
-logger.info ('Инициализация ohwm')
+logger.info ('OHWM initialization ')
 def initialize_openhardwaremonitor():
     clr.AddReference(ohwm_dll)
     from OpenHardwareMonitor import Hardware
@@ -141,10 +144,10 @@ def initialize_openhardwaremonitor():
     return handle
 
 HardwareHandle = initialize_openhardwaremonitor()
-logger.info ('ohwm инициализирован')
+logger.info ('OHWM initialized')
 
 def get_config_data(handle):
-    logger.info ('Инициализируем конфигурацию устройства')
+    logger.info ('Initialize device configuration')
     cpuinfo = {}
     c_count = 0
     for i in handle.Hardware:
@@ -187,7 +190,7 @@ def get_config_data(handle):
         except KeyError:
             continue
     
-    logger.info ('Получаем данные о дисках')
+    logger.info ('Get disks data')
     hddpos = 0
     for pdisk in c.query("SELECT * FROM Win32_DiskDrive"): 
         lnames = []
@@ -202,8 +205,8 @@ def get_config_data(handle):
             l = {'hdd_'+str(hddpos)+'': {'name': pdisk.Model,'size': Size, 'LOGICAL': lnames}}
             driveinfo.append(l)
             
-    logger.info ('Данные о дисках получены')
-    logger.info("Конфигурация устройства инициализирована")
+    logger.info('Disks data recieved')
+    logger.info('Device configuration initialized')
     config_data = {
         "id": {
             "user_id": id_user,
@@ -229,7 +232,7 @@ def get_config_data(handle):
     url = 'https://monyze.ru/api.php'
     #print(json.dumps(config_data, indent=4))  
     requests.post(url, json.dumps(config_data))
-    logger.info('Конфигурация устройства отправлена')
+    logger.info('Device configuration sent')
 
 
 def get_load_data(handle):
@@ -457,9 +460,9 @@ def get_load_data(handle):
     url = 'https://monyze.ru/api.php'
     try:
         requests.post(url, json.dumps(load_data))
-        logger.info('load_data отправлена')
+        logger.info('System load sent')
     except:
-        logger.warning('Ошибка отправки данных load_data')
+        logger.warning('Error sending data')
         logger.warning(traceback.format_exc())
 
 
@@ -485,17 +488,11 @@ class MonyzeAgent(win32serviceutil.ServiceFramework):
 
     def SvcDoRun(self):
         rc = None
-        '''
-        try:
-            get_config_data(HardwareHandle)
-        except:
-            logger.info(traceback.format_exc())
-        '''
         while rc != win32event.WAIT_OBJECT_0:
             try:
                 get_load_data(HardwareHandle)
             except:
-                logger.info('Ошибка в get_load')
+                logger.info('Error in the get_load_data function')
             rc = win32event.WaitForSingleObject(self.hWaitStop, 5000)
 
 
