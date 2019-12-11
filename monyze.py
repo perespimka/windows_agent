@@ -14,7 +14,6 @@ import uuid
 import psutil
 import requests
 import json
-import pprint
 import netifaces
 import traceback
 import sys
@@ -54,7 +53,7 @@ try:
         shutil.copy(config, sys_directory )
     config = service_config
 
-
+    url = 'https://monyze.ru/api_dev'
 
 
     with open(config) as f:
@@ -94,34 +93,26 @@ try:
     ohwm_dll = os.path.join(dll_path, 'OpenHardwareMonitorLib.dll')
 
     logger.info ('------------------------------------- ')
-    logger.info ('Agent starting')
+    logger.info ('Agent v0.0api-py starting')
     try:
         logger.info ("OpenHardwareMonitorLib.dll path: " + ohwm_dll)
     except:
         pass
 
-    pp = pprint.PrettyPrinter(indent=4)
-    nodename = platform.node()
-    system = platform.system()
-    win32_ver = platform.win32_ver()
-    oss = platform.platform()
-    bits = platform.architecture()[0]
+    #pp = pprint.PrettyPrinter(indent=4)
+    
+    #system = platform.system()
+    #win32_ver = platform.win32_ver()
+    
     key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,r"Hardware\Description\System\CentralProcessor\0")
-    processor_brand = winreg.QueryValueEx(key, "ProcessorNameString")[0]
     winreg.CloseKey(key)
-    get_cpu_model = processor_brand
-    mem = psutil.virtual_memory()
-    swap = psutil.swap_memory()
-    partitions = psutil.disk_partitions()
-    interfaces = netifaces.interfaces()
-    adapters = ifaddr.get_adapters()
-    net_stats = psutil.net_if_stats()
+    adapters = ifaddr.get_adapters()   
 
     logger.info ('Variables defined')
 
     driveinfo = []
     cpu_load = {}
-    cpu_cores = []
+
 
     openhardwaremonitor_hwtypes = ['Mainboard', 'SuperIO', 'CPU','RAM', 'GpuNvidia', 'GpuAti', 'TBalancer', 'Heatmaster', 'HDD']
     openhardwaremonitor_sensortypes = ['Voltage', 'Clock', 'Temperature', 'Load','Fan', 'Flow', 'Control', 'Level', 'Factor', 'Power', 'Data', 'SmallData']
@@ -175,6 +166,7 @@ def get_config_data(handle):
                             break
 
         net = {}
+        net_stats = psutil.net_if_stats()
         for i, adapter in enumerate(adapters):
             try:
                 model = adapter.nice_name
@@ -212,7 +204,12 @@ def get_config_data(handle):
                             lnames.append(lname)
                 l = {'hdd_'+str(hddpos)+'': {'name': pdisk.Model,'size': Size, 'LOGICAL': lnames}}
                 driveinfo.append(l)
-                
+        nodename = platform.node()
+        oss = platform.platform()
+        bits = platform.architecture()[0]
+        mem = psutil.virtual_memory()
+        swap = psutil.swap_memory()
+
         logger.info('Disks data recieved')
         logger.info('Device configuration initialized')
         config_data = {
@@ -237,7 +234,7 @@ def get_config_data(handle):
             }
         }
 
-        url = 'https://monyze.ru/api.php'
+
         #print(json.dumps(config_data, indent=4)) 
         #logger.info(json.dumps(config_data, indent=4))   
         requests.post(url, json.dumps(config_data))
@@ -468,7 +465,7 @@ def get_load_data(handle):
             }
         }
 
-        url = 'https://monyze.ru/api.php'
+        
         try:
             #logger.info(json.dumps(load_data, indent=4))  
             requests.post(url, json.dumps(load_data))
